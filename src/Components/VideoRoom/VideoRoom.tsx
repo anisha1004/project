@@ -16,6 +16,7 @@ import AgoraRTC, {
   IMicrophoneAudioTrack,
   UID,
   IAgoraRTCRemoteUser,
+  IAgoraRTCClient,
 } from 'agora-rtc-sdk-ng';
 
 import { VideoPlayer } from '../VideoPlayer';
@@ -36,7 +37,7 @@ const createAgoraClient = ({
   onUserDisconnected: (user: IAgoraRTCRemoteUser) => void;
   channelName: string;
 }) => {
-  const client = AgoraRTC.createClient({
+  const client: IAgoraRTCClient = AgoraRTC.createClient({
     mode: 'rtc',
     codec: 'vp8',
   });
@@ -63,6 +64,9 @@ const createAgoraClient = ({
       client.subscribe(user, mediaType).then(() => {
         if (mediaType === 'video') {
           onVideoTrack(user);
+        }
+        if (mediaType === 'audio') {
+          user?.audioTrack?.play();
         }
       });
     });
@@ -94,6 +98,7 @@ const createAgoraClient = ({
   return {
     disconnect,
     connect,
+    client,
   };
 };
 
@@ -110,13 +115,17 @@ type Message = {
 
 const VideoRoom: React.FC<Props> = ({ channelName, username, channel }) => {
   const [users, setUsers] = React.useState<IAgoraRTCRemoteUser[]>([]);
-  const [currentUser, setCurrentUser] = React.useState<IAgoraRTCRemoteUser>();
-  const [uid, setUid] = React.useState<UID | null>(null);
   const [audioVideoTracks, setAudioVideoTracks] = React.useState<any>();
+  const [micOff, setMicOff] = React.useState<boolean>(false);
+  const [videoOff, setVideoOff] = React.useState<boolean>(false);
+  const [RTCClient, setRTCClient] = React.useState<IAgoraRTCClient>();
 
   React.useEffect(() => {
     const onVideoTrack = (user: IAgoraRTCRemoteUser) => {
-      setUsers((previousUsers) => [...previousUsers, user]);
+      setUsers((previousUsers) => [
+        ...previousUsers.filter((u) => user.uid !== u.uid),
+        user,
+      ]);
     };
 
     const onUserDisconnected = (user: { uid: UID }) => {
@@ -125,15 +134,16 @@ const VideoRoom: React.FC<Props> = ({ channelName, username, channel }) => {
       );
     };
 
-    const { connect, disconnect } = createAgoraClient({
+    const { connect, disconnect, client } = createAgoraClient({
       onVideoTrack,
       onUserDisconnected,
       channelName,
     });
-
+    if (!RTCClient) {
+      setRTCClient(client);
+    }
     const setup = async () => {
       const { tracks } = await connect();
-      setUid(username);
       const audioTrack: any = tracks[0];
       const videoTrack: any = tracks[1];
       const newUser: IAgoraRTCRemoteUser = {
@@ -143,22 +153,18 @@ const VideoRoom: React.FC<Props> = ({ channelName, username, channel }) => {
         hasAudio: true,
         hasVideo: true,
       };
-      setCurrentUser(newUser);
       setAudioVideoTracks(tracks);
       setUsers((previousUsers) => [...previousUsers, newUser]);
     };
 
     const cleanup = async () => {
       await disconnect();
-      setUid(null);
       setUsers([]);
     };
 
-    // setup();
     agoraCommandQueue = agoraCommandQueue.then(setup);
 
     return () => {
-      // cleanup();
       agoraCommandQueue = agoraCommandQueue.then(cleanup);
     };
   }, [channelName, username]);
@@ -166,18 +172,20 @@ const VideoRoom: React.FC<Props> = ({ channelName, username, channel }) => {
   const toggleMic = async () => {
     if (audioVideoTracks[0].muted) {
       await audioVideoTracks[0].setMuted(false);
+      setMicOff(false);
     } else {
       await audioVideoTracks[0].setMuted(true);
+      setMicOff(true);
     }
   };
 
   const toggleVideo = async () => {
     if (audioVideoTracks[1].muted) {
       await audioVideoTracks[1].setMuted(false);
-      // currentUser?.videoTrack?.play();
+      setVideoOff(false);
     } else {
       await audioVideoTracks[1].setMuted(true);
-      currentUser?.videoTrack?.stop();
+      setVideoOff(true);
     }
   };
 
@@ -185,25 +193,28 @@ const VideoRoom: React.FC<Props> = ({ channelName, username, channel }) => {
   const [currentMessage, setCurrentMessage] = React.useState<string>('');
 
   const updateLiveMessages = (message: Message) => {
-    setLiveMessages((prevMessage: Message[]) => [...prevMessage, message]);
+    setLiveMessages((prevMessage: Message[]) => [message, ...prevMessage]);
   };
 
   const sendMessage = () => {
-    channel
-      ?.sendMessage({
-        messageType: 'TEXT',
-        text: JSON.stringify({
-          type: 'chat',
-          message: currentMessage,
-          username,
-        }),
-      })
-      .then(() => {
-        updateLiveMessages({
-          message: currentMessage,
-          username,
+    if (currentMessage !== '') {
+      channel
+        ?.sendMessage({
+          messageType: 'TEXT',
+          text: JSON.stringify({
+            type: 'chat',
+            message: currentMessage,
+            username,
+          }),
+        })
+        .then(() => {
+          updateLiveMessages({
+            message: currentMessage,
+            username,
+          });
+          setCurrentMessage('');
         });
-      });
+    }
   };
 
   React.useEffect(() => {
@@ -217,7 +228,6 @@ const VideoRoom: React.FC<Props> = ({ channelName, username, channel }) => {
       });
     }
   }, [channel]);
-  console.log('***', audioVideoTracks[0].muted);
 
   return (
     <div className="videoroom-page">
@@ -226,24 +236,38 @@ const VideoRoom: React.FC<Props> = ({ channelName, username, channel }) => {
           <VideoIcon />
         </div>
 
-        <div className="videoline"></div>
+        <div className="videoline">
+          <div>{RTCClient?.channelName}</div>
+          <div>{username}</div>
+        </div>
       </div>
       <div className="videoroom-main">
         <div className="call-cont">
           <div className="video-area">
-            {users.map((user) => (
-              <VideoPlayer key={user.uid} user={user} />
-            ))}
+            <div className="local-user-video">
+              {users && users[0] && (
+                <VideoPlayer user={users[0]} userIndex={0} />
+              )}
+            </div>
+            <div className="remote-user-video">
+              {users.map((user, index) => {
+                if (index > 0) {
+                  return (
+                    <VideoPlayer key={user.uid} user={user} userIndex={index} />
+                  );
+                }
+              })}
+            </div>
           </div>
           <div className="video-buttons-area">
             <div className="buttons-area">
-              {audioVideoTracks && audioVideoTracks[0].muted ? (
+              {micOff ? (
                 <MicOff className="video-button" onClick={() => toggleMic()} />
               ) : (
                 <MicOn className="video-button" onClick={() => toggleMic()} />
               )}
 
-              {audioVideoTracks && audioVideoTracks[1].muted ? (
+              {videoOff ? (
                 <VideoOff
                   className="video-button"
                   onClick={() => toggleVideo()}
@@ -260,26 +284,38 @@ const VideoRoom: React.FC<Props> = ({ channelName, username, channel }) => {
               <Options className="video-button" />
             </div>
             <div className="endcall">
-              <button className="endcall-button">End Call</button>
+              <button
+                className="endcall-button"
+                onClick={() => {
+                  window.opener = null;
+                  window.open('', '_self');
+                  window.close();
+                }}
+              >
+                End Call
+              </button>
             </div>
           </div>
         </div>
         <div className="chat-cont">
           <div className="chat-header">In-Call Messages</div>
-          <div className="chat-area"></div>
-          {liveMessages &&
-            liveMessages.map((msg: Message) => (
-              <div className="message-box">
-                <div className="message-username">{msg.username}</div>
-                <div className="message-content">{msg.message}</div>
-              </div>
-            ))}
+          <div className="chat-area">
+            {liveMessages &&
+              liveMessages.map((msg: Message) => (
+                <div className="message-box">
+                  <div className="message-username">{msg.username}</div>
+                  <div className="message-content">{msg.message}</div>
+                </div>
+              ))}
+          </div>
+
           <div className="type-area">
             <input
               type="string"
               placeholder="Type something..."
               className="type-chat"
               onChange={(e) => setCurrentMessage(e.target.value)}
+              value={currentMessage}
             />
             <Send onClick={() => sendMessage()} />
           </div>

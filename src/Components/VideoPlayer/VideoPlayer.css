@@ -1,0 +1,17 @@
+.local-user-player {
+  height: 100%;
+  width: 100%;
+}
+
+.local-user-player > div {
+  border-radius: 20px;
+}
+
+.remote-user-player {
+  height: 100%;
+  width: 300px;
+}
+
+.remote-user-player > div {
+  border-radius: 10px;
+}

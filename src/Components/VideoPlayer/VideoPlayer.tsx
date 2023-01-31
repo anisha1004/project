@@ -1,11 +1,13 @@
 import { IAgoraRTCRemoteUser } from 'agora-rtc-sdk-ng';
 import React from 'react';
+import './VideoPlayer.css';
 
 type Props = {
   user: IAgoraRTCRemoteUser;
+  userIndex: number;
 };
 
-const VideoPlayer: React.FC<Props> = ({ user }) => {
+const VideoPlayer: React.FC<Props> = ({ user, userIndex }) => {
   const ref = React.useRef<any>();
 
   React.useEffect(() => {
@@ -18,10 +20,7 @@ const VideoPlayer: React.FC<Props> = ({ user }) => {
   return (
     <div
       ref={ref}
-      style={{
-        height: '200px',
-        width: '200px',
-      }}
+      className={userIndex === 0 ? 'local-user-player' : 'remote-user-player'}
     />
   );
 };

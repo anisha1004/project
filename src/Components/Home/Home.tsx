@@ -76,7 +76,7 @@ const Home: React.FC<{}> = () => {
               </div>
               <div className="button-cont-home">
                 <button className="button-home" onClick={() => createRoom()}>
-                  Create Join call
+                  Join call
                 </button>
               </div>
             </div>
